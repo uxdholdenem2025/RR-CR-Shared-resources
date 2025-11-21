@@ -17,11 +17,11 @@ from shared_utils import (
     calculate_daily_summaries,
     calculate_weekly_summaries,
     load_data_unified,
-    load_all_data_unified, # <--- ADDED THIS IMPORT
+    load_all_data_unified, # <--- This is the fix for your error
     format_seconds_to_dhm,
     format_duration,
     PASTEL_COLORS,
-    calculate_capacity_risk_summary # Optional if needed later
+    calculate_capacity_risk_summary
 )
 
 # --- IMPORT FROM INSIGHTS UTILS ---
@@ -340,7 +340,8 @@ st.sidebar.title("Upload")
 files = st.sidebar.file_uploader("Excel Files", accept_multiple_files=True)
 
 if files:
-    df_all = load_all_data_unified(files) # Pass the list of files directly
+    # FIXED: Call the unified loader correctly
+    df_all = load_all_data_unified(files) 
     if not df_all.empty:
         tools = ["Risk Tower"] + sorted(df_all['tool_id'].unique().tolist())
         sel = st.sidebar.selectbox("Select Tool", tools)
