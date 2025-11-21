@@ -24,10 +24,10 @@ ALL_RESULT_COLUMNS = [
     'Run Rate Downtime (Stops) (parts)',
     'Actual Output (parts)', 
     'Actual Cycle Time Total (sec)',
-    'Cycle Time Efficiency Gain (Fast Cycles) (sec)',
-    'Cycle Time Efficiency Loss (Slow Cycles) (sec)',
-    'Cycle Time Efficiency Loss (Slow Cycles) (parts)',
-    'Cycle Time Efficiency Gain (Fast Cycles) (parts)',
+    'Cycle Time Efficiency Gain (Fast Cycles) (sec)',   
+    'Cycle Time Efficiency Loss (Slow Cycles) (sec)',   
+    'Cycle Time Efficiency Loss (Slow Cycles) (parts)', 
+    'Cycle Time Efficiency Gain (Fast Cycles) (parts)', 
     'Total Capacity Loss (parts)', 
     'Total Capacity Loss (sec)',
     'Target Output (parts)', 
@@ -72,7 +72,6 @@ def load_data_unified(uploaded_file):
     """Loads data from a SINGLE uploaded file (Excel or CSV) into a DataFrame."""
     try:
         # Handle both Streamlit UploadedFile objects and normal file paths/buffers
-        file_obj = uploaded_file
         if hasattr(uploaded_file, 'seek'):
              uploaded_file.seek(0)
         
@@ -112,10 +111,12 @@ def load_data_unified(uploaded_file):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # If tool_id is missing, try to find it or use a default
+        # If tool_id is missing, try to use filename or default
         if 'tool_id' not in df.columns:
-             # Sometimes tool id is in the filename, but we'll just leave it empty or let the app handle it
-             pass
+             if hasattr(uploaded_file, 'name'):
+                 df['tool_id'] = uploaded_file.name.split('.')[0]
+             else:
+                 df['tool_id'] = 'Unknown_Tool'
 
         return df
     except Exception as e:
@@ -134,7 +135,6 @@ def load_all_data_unified(files):
             if not df.empty:
                 # Ensure tool_id exists for the combined dataframe logic
                 if "tool_id" not in df.columns:
-                     # Fallback: use filename as tool_id if missing
                      df['tool_id'] = file.name.split('.')[0]
                 
                 # Ensure tool_id is string
