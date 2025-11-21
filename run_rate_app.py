@@ -17,6 +17,7 @@ from shared_utils import (
     calculate_daily_summaries,
     calculate_weekly_summaries,
     load_data_unified,
+    load_all_data_unified, # <--- ADDED THIS IMPORT
     format_seconds_to_dhm,
     format_duration,
     PASTEL_COLORS,
@@ -339,7 +340,7 @@ st.sidebar.title("Upload")
 files = st.sidebar.file_uploader("Excel Files", accept_multiple_files=True)
 
 if files:
-    df_all = load_all_data_unified(files[0]) # Default to first file
+    df_all = load_all_data_unified(files) # Pass the list of files directly
     if not df_all.empty:
         tools = ["Risk Tower"] + sorted(df_all['tool_id'].unique().tolist())
         sel = st.sidebar.selectbox("Select Tool", tools)
