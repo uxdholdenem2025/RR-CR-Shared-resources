@@ -10,14 +10,13 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta, date
 
 # --- IMPORT FROM SHARED UTILS ---
-# Ensure shared_utils.py is in the same directory
 from shared_utils import (
     ProductionMetricsCalculator,
     calculate_run_summaries,
     calculate_daily_summaries,
     calculate_weekly_summaries,
     load_data_unified,
-    load_all_data_unified, # <--- This is the fix for your error
+    load_all_data_unified, 
     format_seconds_to_dhm,
     format_duration,
     PASTEL_COLORS,
@@ -25,7 +24,6 @@ from shared_utils import (
 )
 
 # --- IMPORT FROM INSIGHTS UTILS ---
-# Ensure insights_utils.py is in the same directory
 from insights_utils import (
     generate_detailed_analysis,
     generate_bucket_analysis,
@@ -55,20 +53,16 @@ def plot_shot_bar_chart(df, lower_limit, upper_limit, mode_ct):
     df = df.copy()
     df['color'] = np.where(df['stop_flag'] == 1, PASTEL_COLORS['red'], '#3498DB')
     
-    # Jitter Logic for Plotting
-    # We want to see the 'actual' cycle time bars, but gaps should use the wall clock
     downtime_gap_indices = df[df['adj_ct_sec'] != df['Actual CT']].index
     valid_downtime_gap_indices = downtime_gap_indices[downtime_gap_indices > 0]
     normal_shot_indices = df.index.difference(valid_downtime_gap_indices)
 
     if not normal_shot_indices.empty:
-        # Spread out shots that occurred in the same second
         shot_index_in_second = df.loc[normal_shot_indices].groupby('shot_time').cumcount()
         time_offset = pd.to_timedelta(shot_index_in_second * 0.2, unit='s')
         df.loc[normal_shot_indices, 'plot_time'] = df.loc[normal_shot_indices, 'shot_time'] + time_offset
     
     if not valid_downtime_gap_indices.empty:
-        # Gaps start from previous shot
         prev_shot_timestamps = df['shot_time'].shift(1).loc[valid_downtime_gap_indices]
         df.loc[valid_downtime_gap_indices, 'plot_time'] = prev_shot_timestamps
 
@@ -77,12 +71,9 @@ def plot_shot_bar_chart(df, lower_limit, upper_limit, mode_ct):
          
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df['plot_time'], y=df['adj_ct_sec'], marker_color=df['color'], name='Cycle Time', showlegend=False))
-    
-    # Dummy traces for legend consistency
     fig.add_trace(go.Bar(x=[None], y=[None], name="Normal Shot", marker_color='#3498DB', showlegend=True))
     fig.add_trace(go.Bar(x=[None], y=[None], name="Stopped Shot", marker_color=PASTEL_COLORS['red'], showlegend=True))
     
-    # Tolerance Limits
     if not df.empty:
         fig.add_shape(type="rect", xref="x", yref="y", x0=df['shot_time'].min(), y0=lower_limit, x1=df['shot_time'].max(), y1=upper_limit, fillcolor=PASTEL_COLORS['green'], opacity=0.3, layer="below", line_width=0)
             
@@ -99,9 +90,17 @@ def plot_trend_chart(df, x_col, y_col, title, y_title):
 
 def plot_mttr_mtbf_chart(df, x_col):
     if df is None or df.empty: return
+    # Check if columns exist, if not try to fallback to known aliases or return
+    mttr_col = 'mttr_min' if 'mttr_min' in df.columns else 'mttr'
+    mtbf_col = 'mtbf_min' if 'mtbf_min' in df.columns else 'mtbf'
+    
+    if mttr_col not in df.columns or mtbf_col not in df.columns:
+        st.warning(f"Missing MTTR/MTBF columns for chart. Available: {df.columns.tolist()}")
+        return
+
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Scatter(x=df[x_col], y=df['mttr_min'], name='MTTR (min)', line=dict(color='red')), secondary_y=False)
-    fig.add_trace(go.Scatter(x=df[x_col], y=df['mtbf_min'], name='MTBF (min)', line=dict(color='green')), secondary_y=True)
+    fig.add_trace(go.Scatter(x=df[x_col], y=df[mttr_col], name='MTTR (min)', line=dict(color='red')), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df[x_col], y=df[mtbf_col], name='MTBF (min)', line=dict(color='green')), secondary_y=True)
     fig.update_layout(title="MTTR & MTBF Trend")
     st.plotly_chart(fig, use_container_width=True)
 
@@ -118,26 +117,23 @@ def calculate_risk_scores_cached(df_all_tools):
     for tool_id, df_tool in df_all_tools.groupby(id_col):
         if df_tool.empty or len(df_tool) < 10: continue
         
-        # Use Unified Calculator from shared_utils
         calc = ProductionMetricsCalculator(df_tool, 0.05, 2.0, RUN_INTERVAL_HOURS)
         df_proc = calc.results['processed_df']
         
-        # Filter for last 4 weeks
         end_date = df_proc['shot_time'].max()
         start_date = end_date - timedelta(weeks=4)
         df_period = df_proc[(df_proc['shot_time'] >= start_date) & (df_proc['shot_time'] <= end_date)].copy()
         if df_period.empty: continue
         
-        # Recalculate runs for period
         is_new_run = df_period['time_diff_sec'] > (RUN_INTERVAL_HOURS * 3600)
         df_period['run_label'] = is_new_run.cumsum().apply(lambda x: f"Run_{x}")
         
-        # Get Aggregated Summary
         run_sums = calculate_run_summaries(df_period, 0.05, 2.0, RUN_INTERVAL_HOURS)
         if run_sums.empty: continue
         
         tot_run = run_sums['total_runtime_sec'].sum()
         prod_time = run_sums['production_time_sec'].sum()
+        # Use the correct key from run_sums
         down_time = run_sums['downtime_sec'].sum()
         stops = run_sums['stops'].sum()
         
@@ -153,8 +149,6 @@ def calculate_risk_scores_cached(df_all_tools):
         
     if not initial_metrics: return pd.DataFrame()
     df_metrics = pd.DataFrame(initial_metrics)
-    
-    # Simple Score Logic
     df_metrics['Risk Score'] = df_metrics['Stability'] 
     return df_metrics.sort_values('Risk Score')
 
@@ -182,7 +176,6 @@ def render_dashboard(df_tool, tool_id_selection):
     st.sidebar.markdown("---")
     tolerance = st.sidebar.slider("Tolerance Band (% of Mode CT)", 0.01, 0.50, 0.25, 0.01)
     downtime_gap = st.sidebar.slider("Downtime Gap (sec)", 0.0, 5.0, 2.0, 0.5)
-    # This slider now actively controls the Math via shared_utils
     run_interval = st.sidebar.slider("Run Interval Threshold (hours)", 1, 24, 8, 1)
     
     st.sidebar.markdown("---")
@@ -199,7 +192,6 @@ def render_dashboard(df_tool, tool_id_selection):
     df_view = pd.DataFrame()
     sub_header = ""
     
-    # --- Filtering Logic ---
     if "Daily" in analysis_level:
         dates = sorted(df_dates['date'].unique())
         sel_date = st.selectbox("Select Date", dates, index=len(dates)-1)
@@ -224,19 +216,16 @@ def render_dashboard(df_tool, tool_id_selection):
     if df_view.empty:
         st.warning("No data."); return
 
-    # --- MAIN CALCULATION (Using Shared Utils) ---
+    # --- MAIN CALCULATION ---
     st.title(f"Run Rate: {tool_id_selection}")
     st.subheader(sub_header)
     
     if 'by Run' in analysis_level:
-        # 1. Identify runs for labeling (split by gap > run_interval)
         is_new_run = df_view['shot_time'].diff().dt.total_seconds() > (run_interval * 3600)
         df_view['run_label'] = is_new_run.cumsum().apply(lambda x: f"Run_{x+1}")
         
-        # 2. Calculate summaries (Logic handles weekend exclusion implicitly via gap check)
         run_summaries = calculate_run_summaries(df_view, tolerance, downtime_gap, run_interval)
         
-        # 3. Aggregate totals
         total_runtime = run_summaries['total_runtime_sec'].sum()
         prod_time = run_summaries['production_time_sec'].sum()
         downtime = run_summaries['downtime_sec'].sum()
@@ -247,16 +236,15 @@ def render_dashboard(df_tool, tool_id_selection):
         mttr = (downtime / 60 / stops) if stops > 0 else 0
         mtbf = (prod_time / 60 / stops) if stops > 0 else (prod_time / 60)
         
-        # 4. Full calculator for shot charts
         calc_full = ProductionMetricsCalculator(df_view, tolerance, downtime_gap, run_interval)
         res_full = calc_full.results
         
-        # 5. Trend data
-        trend_df = run_summaries.rename(columns={'run_label': 'period', 'stability_index': 'stability', 'mttr_min': 'mttr', 'mtbf_min': 'mtbf', 'stops': 'stops'})
+        # Keep original column names for plotting, or rename carefully
+        trend_df = run_summaries.rename(columns={'run_label': 'period'})
+        # Ensure we have mttr_min/mtbf_min from calculate_run_summaries
         trend_x = 'period'
         
     else:
-        # Daily Logic (Now safe due to shared_utils weekend exclusion)
         calc = ProductionMetricsCalculator(df_view, tolerance, downtime_gap, run_interval)
         res = calc.results
         res_full = res
@@ -270,7 +258,10 @@ def render_dashboard(df_tool, tool_id_selection):
         mttr = res['mttr_min']
         mtbf = res['mtbf_min']
         
-        trend_df = res['hourly_summary'].rename(columns={'hour': 'period', 'stability_index': 'stability', 'mttr_min': 'mttr', 'mtbf_min': 'mtbf'})
+        # Ensure hourly summary has 'period'
+        trend_df = res['hourly_summary'].copy()
+        trend_df['period'] = trend_df['hour']
+        # It already has 'mttr_min' and 'mtbf_min' from shared_utils
         trend_x = 'period'
 
     # --- METRICS DISPLAY ---
@@ -295,18 +286,33 @@ def render_dashboard(df_tool, tool_id_selection):
     with c2:
         st.subheader("Stability Trend")
         if not trend_df.empty:
-            plot_trend_chart(trend_df, trend_x, 'stability', "Stability Trend", "Stability %")
+            # Use correct column name for stability
+            stab_col = 'stability_index' if 'stability_index' in trend_df.columns else 'stability'
+            plot_trend_chart(trend_df, trend_x, stab_col, "Stability Trend", "Stability %")
 
     if not trend_df.empty:
         st.subheader("MTTR & MTBF Trend")
         plot_mttr_mtbf_chart(trend_df, trend_x)
 
-    # --- AI INSIGHTS (Using separated insights_utils) ---
+    # --- AI INSIGHTS ---
     if detailed_view:
         st.markdown("---")
         with st.expander("🤖 Automated Analysis Summary", expanded=False):
-            insights = generate_detailed_analysis(trend_df, stability, mttr, mtbf, analysis_level)
-            mttr_insight = generate_mttr_mtbf_analysis(trend_df, analysis_level)
+            # Prepare DF for insights (needs specific column names)
+            insight_df = trend_df.copy()
+            
+            # Map columns to expected names for insights
+            rename_map = {
+                'stability_index': 'stability', 
+                'mttr_min': 'mttr', 
+                'mtbf_min': 'mtbf',
+                'stops': 'stops'
+                # 'period' is already there from above logic
+            }
+            insight_df.rename(columns=rename_map, inplace=True)
+            
+            insights = generate_detailed_analysis(insight_df, stability, mttr, mtbf, analysis_level)
+            mttr_insight = generate_mttr_mtbf_analysis(insight_df, analysis_level)
             
             if "error" in insights:
                 st.error(insights["error"])
@@ -340,8 +346,7 @@ st.sidebar.title("Upload")
 files = st.sidebar.file_uploader("Excel Files", accept_multiple_files=True)
 
 if files:
-    # FIXED: Call the unified loader correctly
-    df_all = load_all_data_unified(files) 
+    df_all = load_all_data_unified(files)
     if not df_all.empty:
         tools = ["Risk Tower"] + sorted(df_all['tool_id'].unique().tolist())
         sel = st.sidebar.selectbox("Select Tool", tools)
