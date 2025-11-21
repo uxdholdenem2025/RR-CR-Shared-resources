@@ -24,10 +24,10 @@ ALL_RESULT_COLUMNS = [
     'Run Rate Downtime (Stops) (parts)',
     'Actual Output (parts)', 
     'Actual Cycle Time Total (sec)',
-    'Cycle Time Efficiency Gain (Fast Cycles) (sec)',   # Renamed from Efficiency Gain
-    'Cycle Time Efficiency Loss (Slow Cycles) (sec)',   # Renamed from Efficiency Loss
-    'Cycle Time Efficiency Loss (Slow Cycles) (parts)', # Renamed from Efficiency Loss
-    'Cycle Time Efficiency Gain (Fast Cycles) (parts)', # Renamed from Efficiency Gain
+    'Cycle Time Efficiency Gain (Fast Cycles) (sec)',
+    'Cycle Time Efficiency Loss (Slow Cycles) (sec)',
+    'Cycle Time Efficiency Loss (Slow Cycles) (parts)',
+    'Cycle Time Efficiency Gain (Fast Cycles) (parts)',
     'Total Capacity Loss (parts)', 
     'Total Capacity Loss (sec)',
     'Target Output (parts)', 
@@ -69,13 +69,17 @@ def format_duration(seconds):
 
 @st.cache_data
 def load_data_unified(uploaded_file):
-    """Loads data from the uploaded file (Excel or CSV) into a DataFrame."""
+    """Loads data from a SINGLE uploaded file (Excel or CSV) into a DataFrame."""
     try:
-        if uploaded_file.name.endswith('.csv'):
-            uploaded_file.seek(0)
+        # Handle both Streamlit UploadedFile objects and normal file paths/buffers
+        file_obj = uploaded_file
+        if hasattr(uploaded_file, 'seek'):
+             uploaded_file.seek(0)
+        
+        if hasattr(uploaded_file, 'name') and uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
-            uploaded_file.seek(0)
+            # Default to excel for xlsx or unknown
             df = pd.read_excel(uploaded_file)
             
         df.columns = df.columns.str.strip()
@@ -107,11 +111,43 @@ def load_data_unified(uploaded_file):
         for col in ['Actual CT', 'Approved CT', 'Working Cavities']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-                
+        
+        # If tool_id is missing, try to find it or use a default
+        if 'tool_id' not in df.columns:
+             # Sometimes tool id is in the filename, but we'll just leave it empty or let the app handle it
+             pass
+
         return df
     except Exception as e:
         st.error(f"Error loading file: {e}")
         return pd.DataFrame()
+
+@st.cache_data
+def load_all_data_unified(files):
+    """Loads and combines MULTIPLE uploaded Excel/CSV files."""
+    df_list = []
+    for file in files:
+        try:
+            # Call the single file loader
+            df = load_data_unified(file)
+            
+            if not df.empty:
+                # Ensure tool_id exists for the combined dataframe logic
+                if "tool_id" not in df.columns:
+                     # Fallback: use filename as tool_id if missing
+                     df['tool_id'] = file.name.split('.')[0]
+                
+                # Ensure tool_id is string
+                df['tool_id'] = df['tool_id'].astype(str)
+                df_list.append(df)
+                
+        except Exception as e:
+            st.warning(f"Could not load file: {file.name}. Error: {e}")
+    
+    if not df_list:
+        return pd.DataFrame()
+        
+    return pd.concat(df_list, ignore_index=True)
 
 # ==============================================================================
 # --- 3. CORE CALCULATION ENGINE (THE "SINGLE TRUTH") ---
