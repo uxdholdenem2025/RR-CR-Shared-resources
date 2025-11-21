@@ -10,13 +10,14 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta, date
 
 # --- IMPORT FROM SHARED UTILS ---
+# Ensure shared_utils.py is in the same directory
 from shared_utils import (
     ProductionMetricsCalculator,
     calculate_run_summaries,
     calculate_daily_summaries,
     calculate_weekly_summaries,
     load_data_unified,
-    load_all_data_unified, 
+    load_all_data_unified, # Ensures the data loading function is available
     format_seconds_to_dhm,
     format_duration,
     PASTEL_COLORS,
@@ -24,6 +25,7 @@ from shared_utils import (
 )
 
 # --- IMPORT FROM INSIGHTS UTILS ---
+# Ensure insights_utils.py is in the same directory
 from insights_utils import (
     generate_detailed_analysis,
     generate_bucket_analysis,
@@ -53,6 +55,7 @@ def plot_shot_bar_chart(df, lower_limit, upper_limit, mode_ct):
     df = df.copy()
     df['color'] = np.where(df['stop_flag'] == 1, PASTEL_COLORS['red'], '#3498DB')
     
+    # Jitter Logic for Plotting
     downtime_gap_indices = df[df['adj_ct_sec'] != df['Actual CT']].index
     valid_downtime_gap_indices = downtime_gap_indices[downtime_gap_indices > 0]
     normal_shot_indices = df.index.difference(valid_downtime_gap_indices)
@@ -90,12 +93,12 @@ def plot_trend_chart(df, x_col, y_col, title, y_title):
 
 def plot_mttr_mtbf_chart(df, x_col):
     if df is None or df.empty: return
-    # Check if columns exist, if not try to fallback to known aliases or return
+    # Check for columns or fallback aliases
     mttr_col = 'mttr_min' if 'mttr_min' in df.columns else 'mttr'
     mtbf_col = 'mtbf_min' if 'mtbf_min' in df.columns else 'mtbf'
     
     if mttr_col not in df.columns or mtbf_col not in df.columns:
-        st.warning(f"Missing MTTR/MTBF columns for chart. Available: {df.columns.tolist()}")
+        # Silent return if columns missing to prevent crash
         return
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -128,12 +131,12 @@ def calculate_risk_scores_cached(df_all_tools):
         is_new_run = df_period['time_diff_sec'] > (RUN_INTERVAL_HOURS * 3600)
         df_period['run_label'] = is_new_run.cumsum().apply(lambda x: f"Run_{x}")
         
+        # Pass run_interval_hours to calculation
         run_sums = calculate_run_summaries(df_period, 0.05, 2.0, RUN_INTERVAL_HOURS)
         if run_sums.empty: continue
         
         tot_run = run_sums['total_runtime_sec'].sum()
         prod_time = run_sums['production_time_sec'].sum()
-        # Use the correct key from run_sums
         down_time = run_sums['downtime_sec'].sum()
         stops = run_sums['stops'].sum()
         
@@ -224,8 +227,10 @@ def render_dashboard(df_tool, tool_id_selection):
         is_new_run = df_view['shot_time'].diff().dt.total_seconds() > (run_interval * 3600)
         df_view['run_label'] = is_new_run.cumsum().apply(lambda x: f"Run_{x+1}")
         
+        # Calculate Summaries
         run_summaries = calculate_run_summaries(df_view, tolerance, downtime_gap, run_interval)
         
+        # Aggregated Totals
         total_runtime = run_summaries['total_runtime_sec'].sum()
         prod_time = run_summaries['production_time_sec'].sum()
         downtime = run_summaries['downtime_sec'].sum()
@@ -239,9 +244,7 @@ def render_dashboard(df_tool, tool_id_selection):
         calc_full = ProductionMetricsCalculator(df_view, tolerance, downtime_gap, run_interval)
         res_full = calc_full.results
         
-        # Keep original column names for plotting, or rename carefully
-        trend_df = run_summaries.rename(columns={'run_label': 'period'})
-        # Ensure we have mttr_min/mtbf_min from calculate_run_summaries
+        trend_df = run_summaries.rename(columns={'run_label': 'period', 'stability_index': 'stability', 'mttr_min': 'mttr', 'mtbf_min': 'mtbf', 'stops': 'stops'})
         trend_x = 'period'
         
     else:
@@ -258,10 +261,7 @@ def render_dashboard(df_tool, tool_id_selection):
         mttr = res['mttr_min']
         mtbf = res['mtbf_min']
         
-        # Ensure hourly summary has 'period'
-        trend_df = res['hourly_summary'].copy()
-        trend_df['period'] = trend_df['hour']
-        # It already has 'mttr_min' and 'mtbf_min' from shared_utils
+        trend_df = res['hourly_summary'].rename(columns={'hour': 'period', 'stability_index': 'stability', 'mttr_min': 'mttr', 'mtbf_min': 'mtbf'})
         trend_x = 'period'
 
     # --- METRICS DISPLAY ---
@@ -286,8 +286,7 @@ def render_dashboard(df_tool, tool_id_selection):
     with c2:
         st.subheader("Stability Trend")
         if not trend_df.empty:
-            # Use correct column name for stability
-            stab_col = 'stability_index' if 'stability_index' in trend_df.columns else 'stability'
+            stab_col = 'stability' if 'stability' in trend_df.columns else 'stability_index'
             plot_trend_chart(trend_df, trend_x, stab_col, "Stability Trend", "Stability %")
 
     if not trend_df.empty:
@@ -298,16 +297,10 @@ def render_dashboard(df_tool, tool_id_selection):
     if detailed_view:
         st.markdown("---")
         with st.expander("🤖 Automated Analysis Summary", expanded=False):
-            # Prepare DF for insights (needs specific column names)
             insight_df = trend_df.copy()
-            
-            # Map columns to expected names for insights
             rename_map = {
-                'stability_index': 'stability', 
-                'mttr_min': 'mttr', 
-                'mtbf_min': 'mtbf',
-                'stops': 'stops'
-                # 'period' is already there from above logic
+                'stability_index': 'stability', 'mttr_min': 'mttr', 
+                'mtbf_min': 'mtbf', 'stops': 'stops'
             }
             insight_df.rename(columns=rename_map, inplace=True)
             
@@ -320,16 +313,12 @@ def render_dashboard(df_tool, tool_id_selection):
                 st.markdown(f"""
                 ### Overall Assessment
                 {insights['overall']}
-                
                 ### Predictive Trend
                 {insights['predictive']}
-                
                 ### Performance Variance
                 {insights['best_worst']}
-                
                 ### Key Recommendation
                 {insights['recommendation']}
-                
                 ---
                 ### Correlation Analysis
                 {mttr_insight}
@@ -346,6 +335,7 @@ st.sidebar.title("Upload")
 files = st.sidebar.file_uploader("Excel Files", accept_multiple_files=True)
 
 if files:
+    # FIX: Pass the LIST of files, not just the first one
     df_all = load_all_data_unified(files)
     if not df_all.empty:
         tools = ["Risk Tower"] + sorted(df_all['tool_id'].unique().tolist())
